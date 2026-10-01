@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="Author" content="Error505">
+<meta name="description" content="Sistema de visión artificial ANPR para el surtidor Jacha Inti">
+<title>Surtidor - Jacha Inti</title>
+<style>
+:root{--verde:#0b6b36;--rojo:#a81d17;--tinta:#12171b;--papel:#f4f6f3;--sol:#ffd23f}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;background:var(--tinta);color:var(--papel)}
+button,input{font:inherit}
+:focus-visible{outline:4px solid var(--sol);outline-offset:3px}
+
+/* Pantalla de espera: video + escaneo */
+#espera{display:grid;grid-template-rows:auto 1fr auto;height:100%}
+header{display:flex;justify-content:space-between;gap:1rem;padding:.8rem 1.2rem;font-size:1.1rem}
+#estadoSis{opacity:.85}
+#video{width:100%;height:100%;min-height:0;object-fit:contain;background:#000}
+footer{display:flex;flex-wrap:wrap;gap:.8rem;padding:1rem 1.2rem;align-items:center}
+#btnEscanear{flex:1 1 320px;padding:1.3rem;font-size:clamp(1.6rem,4vw,2.6rem);font-weight:800;border:0;border-radius:.6rem;background:var(--sol);color:#1a1a1a;cursor:pointer}
+#btnEscanear:disabled{opacity:.6;cursor:wait}
+#manual{display:flex;gap:.5rem}
+#placaManual{width:9.5rem;padding:.8rem;font-size:1.3rem;text-transform:uppercase;border-radius:.4rem;border:2px solid #56606a;background:#1d2329;color:var(--papel)}
+#btnManual{padding:.8rem 1rem;border-radius:.4rem;border:2px solid #56606a;background:transparent;color:var(--papel);cursor:pointer}
+
+/* Resultado a pantalla completa */
+#res{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;gap:1.1rem;padding:1.5rem;text-align:center;overflow:auto;color:#fff}
+#res.verde{background:var(--verde);display:flex}
+#res.rojo{background:var(--rojo);display:flex}
+#estado{font-size:clamp(2.6rem,9vw,6.5rem);font-weight:900;line-height:1}
+.placa{background:#fff;color:#111;border:.35rem solid #111;border-radius:.6rem;padding:.1em .5em;font-size:clamp(2.2rem,8vw,5rem);font-weight:900;letter-spacing:.12em}
+#motivo{font-size:clamp(1.5rem,4vw,2.6rem);font-weight:700;margin:0;max-width:26ch}
+#datos{display:grid;grid-template-columns:repeat(auto-fit,minmax(12rem,1fr));gap:1rem 2rem;margin:0;width:min(60rem,100%)}
+#datos div{background:rgba(0,0,0,.22);border-radius:.5rem;padding:.7rem 1rem}
+#datos dt{font-size:1.05rem;opacity:.9}
+#datos dd{margin:.15rem 0 0;font-size:clamp(1.4rem,3.4vw,2.2rem);font-weight:800;overflow-wrap:anywhere}
+#despacho{display:flex;flex-wrap:wrap;gap:.8rem;justify-content:center;align-items:end}
+#despacho label{display:grid;gap:.3rem;font-size:1.15rem;text-align:left}
+#litros{width:11rem;padding:.7rem;font-size:2rem;font-weight:800;border-radius:.4rem;border:0;color:#111}
+.btn{padding:1rem 1.8rem;font-size:clamp(1.3rem,3vw,1.9rem);font-weight:800;border-radius:.5rem;cursor:pointer;border:.2rem solid #fff}
+#btnConfirmar{background:#fff;color:var(--verde)}
+#btnConfirmar:disabled{opacity:.6;cursor:wait}
+#btnNueva{background:transparent;color:#fff}
+#aviso{min-height:1.6em;margin:0;font-size:1.4rem;font-weight:700}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:no-preference){#res{animation:aparece .18s ease-out}@keyframes aparece{from{opacity:0}}}
+</style>
+</head>
+<body>
+
+<main id="espera">
+  <header>
+    <strong id="tituloSurtidor">Surtidor 1</strong>
+    <span id="estadoSis" aria-live="polite">Conectando…</span>
+  </header>
+  <img id="video" src="/stream" alt="Video en vivo del carril">
+  <footer>
+    <button id="btnEscanear">Escanear placa</button>
+    <form id="manual" autocomplete="off">
+      <input id="placaManual" maxlength="10" placeholder="1234ABC" aria-label="Placa escrita a mano">
+      <button id="btnManual" type="submit">Consultar</button>
+    </form>
+  </footer>
+</main>
+
+<section id="res" aria-live="assertive">
+  <div id="estado"></div>
+  <div id="placa" class="placa"></div>
+  <p id="motivo"></p>
+  <dl id="datos"></dl>
+  <div id="despacho" hidden>
+    <label>Litros a despachar
+      <input id="litros" type="number" step="0.01" min="0.01" inputmode="decimal">
+    </label>
+    <button id="btnConfirmar" class="btn">Confirmar despacho</button>
+  </div>
+  <p id="aviso" role="alert"></p>
+  <button id="btnNueva" class="btn">Nueva lectura</button>
+</section>
+
+<script>
+const $ = id => document.getElementById(id);
+const SURTIDOR = parseInt(new URLSearchParams(location.search).get("surtidor")) || 1;
+let vehiculo = null, placaActual = null, cierre = null;
+
+$("tituloSurtidor").textContent = "Surtidor " + SURTIDOR;
+
+async function api(url, opciones = {}) {
+  const ctl = new AbortController();
+  const t = setTimeout(() => ctl.abort(), 20000);
+  try {
+    const r = await fetch(url, { ...opciones, signal: ctl.signal });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : "Datos inválidos (" + r.status + ")");
+    return j;
+  } catch (e) {
+    throw new Error(e.name === "AbortError" ? "El servidor tardó demasiado en responder." : e.message);
+  } finally { clearTimeout(t); }
+}
+
+function pantalla(color, estado, placa, motivo) {
+  clearTimeout(cierre);
+  $("res").className = color;
+  $("estado").textContent = estado;
+  $("placa").textContent = placa || "—";
+  $("placa").hidden = !placa;
+  $("motivo").textContent = motivo || "";
+  $("aviso").textContent = "";
+  $("datos").replaceChildren();
+  $("despacho").hidden = true;
+  $("btnNueva").textContent = "Nueva lectura";
+  $("btnNueva").focus();
+}
+
+function dato(titulo, valor) {
+  const d = document.createElement("div"), t = document.createElement("dt"), v = document.createElement("dd");
+  t.textContent = titulo; v.textContent = valor; d.append(t, v); $("datos").append(d);
+}
+
+function mostrar(r) {
+  vehiculo = r.vehiculo; placaActual = r.placa;
+  if (r.resultado === "VERDE") {
+    pantalla("verde", "✔ HABILITADO", r.placa, "");
+    dato("Propietario", vehiculo.propietario);
+    dato("Combustible", vehiculo.tipo_combustible);
+    dato("Litros disponibles", vehiculo.cupo_disponible_litros.toFixed(2) + " L");
+    dato("Capacidad del tanque", vehiculo.capacidad_tanque_litros.toFixed(2) + " L");
+    $("litros").max = vehiculo.cupo_disponible_litros;
+    $("litros").value = Math.min(vehiculo.capacidad_tanque_litros, vehiculo.cupo_disponible_litros).toFixed(2);
+    $("despacho").hidden = false;
+    $("litros").focus(); $("litros").select();
+  } else {
+    pantalla("rojo", "✖ BLOQUEADO", r.placa, r.motivo);
+    if (vehiculo) { dato("Propietario", vehiculo.propietario); dato("Litros disponibles", vehiculo.cupo_disponible_litros.toFixed(2) + " L"); }
+  }
+}
+
+function error(msg) { pantalla("rojo", "✖ ERROR DEL SISTEMA", null, msg); }
+
+async function validar(manual) {
+  const botones = [$("btnEscanear"), $("btnManual")];
+  botones.forEach(b => b.disabled = true);
+  $("btnEscanear").textContent = "Leyendo placa…";
+  try {
+    const opciones = { method: "POST" };
+    if (manual) { const f = new FormData(); f.append("placa_manual", manual); opciones.body = f; }
+    mostrar(await api("/validar", opciones));
+  } catch (e) { error(e.message); }
+  finally { botones.forEach(b => b.disabled = false); $("btnEscanear").textContent = "Escanear placa"; }
+}
+
+async function confirmar() {
+  const litros = parseFloat($("litros").value);
+  if (!(litros > 0)) { $("aviso").textContent = "Ingresa los litros a despachar."; return; }
+  if (litros > vehiculo.cupo_disponible_litros) { $("aviso").textContent = "Máximo permitido: " + vehiculo.cupo_disponible_litros.toFixed(2) + " L."; return; }
+  $("btnConfirmar").disabled = true;
+  try {
+    const r = await api("/despachar", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ placa: placaActual, litros, surtidor_id: SURTIDOR }) });
+    if (r.autorizado) {
+      pantalla("verde", "✔ DESPACHO REGISTRADO", r.placa, "");
+      dato("Litros despachados", r.litros.toFixed(2) + " L");
+      dato("Cupo restante", r.cupo_restante.toFixed(2) + " L");
+      $("btnNueva").textContent = "Siguiente vehículo";
+      cierre = setTimeout(reiniciar, 10000);
+    } else {
+      pantalla("rojo", "✖ BLOQUEADO", r.placa, r.motivo);
+    }
+  } catch (e) { $("aviso").textContent = e.message; }
+  finally { $("btnConfirmar").disabled = false; }
+}
+
+function reiniciar() {
+  clearTimeout(cierre);
+  $("res").className = ""; vehiculo = null; placaActual = null;
+  $("btnEscanear").focus();
+}
+
+async function estadoSistema() {
+  try {
+    const h = await api("/health");
+    $("estadoSis").textContent = "Base de datos: " + h.base_de_datos + " | Cámara: " + h.camara;
+  } catch { $("estadoSis").textContent = "Sin conexión con el servidor"; }
+}
+
+$("btnEscanear").onclick = () => validar();
+$("manual").onsubmit = e => { e.preventDefault(); const p = $("placaManual").value.trim(); if (p) validar(p); };
+$("btnConfirmar").onclick = confirmar;
+$("btnNueva").onclick = reiniciar;
+$("litros").onkeydown = e => { if (e.key === "Enter") confirmar(); };
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && $("res").className) reiniciar();
+});
+estadoSistema(); setInterval(estadoSistema, 10000);
+</script>
+</body>
+</html>

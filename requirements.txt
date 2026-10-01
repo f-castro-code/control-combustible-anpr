@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
-opencv-python
+opencv-python-headless
 pytesseract
 mysql-connector-python
 python-dotenv

@@ -15,13 +15,17 @@ Documentación interactiva:
 
 import asyncio
 import logging
+import secrets
 import threading
 import time
 from contextlib import asynccontextmanager
+from datetime import date
+from typing import Literal
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -30,9 +34,16 @@ from config import BASE_DIR, CAMARA_URL
 from ocr_engine import es_placa_valida, leer_placa
 from schemas import (
     DespacharRequest,
+    DespachoItem,
     DespacharResponse,
+    LoginRequest,
+    LoginResponse,
+    StatsResponse,
     ValidarResponse,
+    VehiculoAdmin,
+    VehiculoGuardado,
     VehiculoInfo,
+    VehiculoUpsert,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -149,12 +160,110 @@ def _evaluar_vehiculo(vehiculo: dict | None) -> tuple[str, str | None]:
 
 
 # ---------------------------------------------------------------------
+# Autenticación y roles (sesiones en memoria: se pierden al reiniciar el servidor)
+# ---------------------------------------------------------------------
+DURACION_SESION = 8 * 3600  # 8 horas
+SESIONES: dict[str, dict] = {}
+esquema_bearer = HTTPBearer(auto_error=False, description="Token obtenido en POST /login")
+
+
+def usuario_actual(cred: HTTPAuthorizationCredentials | None = Depends(esquema_bearer)) -> dict:
+    sesion = SESIONES.get(cred.credentials) if cred else None
+    if sesion is None or sesion["expira"] < time.time():
+        if cred:
+            SESIONES.pop(cred.credentials, None)
+        raise HTTPException(status_code=401, detail="Sesión no válida o expirada. Inicia sesión.",
+                            headers={"WWW-Authenticate": "Bearer"})
+    return sesion
+
+
+def requiere_rol(*roles: str):
+    def dependencia(sesion: dict = Depends(usuario_actual)) -> dict:
+        if sesion["rol"] not in roles:
+            raise HTTPException(status_code=403, detail="No tienes permiso para esta sección.")
+        return sesion
+    return dependencia
+
+
+@app.post("/login", response_model=LoginResponse, summary="Iniciar sesión")
+def login(datos: LoginRequest):
+    """Valida usuario y contraseña y devuelve un token y el rol (ADMIN o PLAYERO)."""
+    try:
+        usuario = database.validar_usuario(datos.username, datos.password)
+    except Exception as e:
+        logger.error("Error en login: %s", e)
+        raise HTTPException(status_code=503, detail="Base de datos no disponible.")
+
+    if usuario is None:
+        logger.warning("Login fallido para '%s'", datos.username)
+        raise HTTPException(status_code=401, detail="Usuario o contraseña incorrectos.")
+
+    token = secrets.token_urlsafe(32)
+    SESIONES[token] = {**usuario, "expira": time.time() + DURACION_SESION}
+    return LoginResponse(token=token, rol=usuario["rol"], nombre=usuario["nombre"],
+                         expira_en_segundos=DURACION_SESION)
+
+
+@app.get("/admin/stats", response_model=StatsResponse, summary="Métricas del dashboard (solo ADMIN)")
+def admin_stats(_: dict = Depends(requiere_rol("ADMIN"))):
+    try:
+        return StatsResponse(**database.obtener_stats_hoy())
+    except Exception as e:
+        logger.error("Error obteniendo métricas: %s", e)
+        raise HTTPException(status_code=503, detail="Base de datos no disponible.")
+
+
+@app.get("/admin/despachos", response_model=list[DespachoItem], summary="Historial de despachos (solo ADMIN)")
+def admin_despachos(
+    desde: date | None = None,
+    hasta: date | None = None,
+    placa: str | None = None,
+    surtidor_id: int | None = Query(None, ge=1),
+    estado: Literal["APROBADO", "RECHAZADO"] | None = None,
+    limite: int = Query(200, ge=1, le=1000),
+    _: dict = Depends(requiere_rol("ADMIN")),
+):
+    try:
+        return database.listar_despachos(desde, hasta, placa, surtidor_id, estado, limite)
+    except Exception as e:
+        logger.error("Error listando despachos: %s", e)
+        raise HTTPException(status_code=503, detail="Base de datos no disponible.")
+
+
+@app.get("/admin/vehiculos", response_model=list[VehiculoAdmin], summary="Listar vehículos (solo ADMIN)")
+def admin_listar_vehiculos(q: str | None = None, _: dict = Depends(requiere_rol("ADMIN"))):
+    try:
+        return database.listar_vehiculos(q)
+    except Exception as e:
+        logger.error("Error listando vehículos: %s", e)
+        raise HTTPException(status_code=503, detail="Base de datos no disponible.")
+
+
+@app.post("/admin/vehiculos", response_model=VehiculoGuardado, summary="Registrar o actualizar un vehículo (solo ADMIN)")
+def admin_guardar_vehiculo(datos: VehiculoUpsert, sesion: dict = Depends(requiere_rol("ADMIN"))):
+    """Si la placa no existe se crea; si existe se actualizan sus datos y su estado (HABILITADO/INHABILITADO)."""
+    placa = database.normalizar_placa(datos.placa)
+    if not es_placa_valida(placa):
+        raise HTTPException(status_code=422, detail="Placa inválida. Formato esperado: 1234ABC.")
+    try:
+        creado, fila = database.guardar_vehiculo({**datos.model_dump(), "placa": placa})
+    except Exception as e:
+        if getattr(e, "errno", None) == 3819:  # violación de CHECK
+            raise HTTPException(status_code=422, detail="Los datos no cumplen las reglas del sistema.")
+        logger.error("Error guardando vehículo %s: %s", placa, e)
+        raise HTTPException(status_code=503, detail="Base de datos no disponible.")
+    logger.info("Vehículo %s %s por '%s'", placa, "creado" if creado else "actualizado", sesion["username"])
+    return VehiculoGuardado(creado=creado, vehiculo=fila)
+
+
+# ---------------------------------------------------------------------
 # POST /validar
 # ---------------------------------------------------------------------
 @app.post("/validar", response_model=ValidarResponse, summary="Leer placa y validar cupo")
 def validar(
     imagen: UploadFile | None = File(None, description="Foto o fotograma con la placa (JPG/PNG)"),
     placa_manual: str | None = Form(None, description="Solo para pruebas: placa escrita a mano (omite el OCR)"),
+    _: dict = Depends(requiere_rol("PLAYERO", "ADMIN")),
 ):
     """
     Lee la placa de la imagen con el motor OCR y consulta en MySQL si el vehículo
@@ -232,7 +341,7 @@ def validar(
 # POST /despachar
 # ---------------------------------------------------------------------
 @app.post("/despachar", response_model=DespacharResponse, summary="Descontar cupo y registrar despacho")
-def despachar(datos: DespacharRequest):
+def despachar(datos: DespacharRequest, _: dict = Depends(requiere_rol("PLAYERO", "ADMIN"))):
     """
     Ejecuta el procedimiento `sp_validar_y_despachar`: verifica de nuevo el estado y
     el cupo, descuenta los litros y registra la transacción (APROBADO o RECHAZADO).
@@ -269,8 +378,11 @@ def health():
 
 
 @app.get("/stream", summary="Video en vivo de la cámara (MJPEG)")
-async def stream(request: Request):
-    """Retransmite la cámara IP. Se usa como <img src="/stream"> o abriéndolo en el navegador."""
+async def stream(request: Request, token: str | None = None):
+    """Retransmite la cámara IP. Un <img> no puede enviar cabeceras, por eso el token va en ?token=..."""
+    sesion = SESIONES.get(token or "")
+    if sesion is None or sesion["expira"] < time.time():
+        raise HTTPException(status_code=401, detail="Sesión no válida. Inicia sesión.")
     return StreamingResponse(_mjpeg(request), media_type="multipart/x-mixed-replace; boundary=frame")
 
 

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Administración - Jacha Inti</title>
+<style>
+:root{--fondo:#e9eef0;--tinta:#10303b;--texto:#1c2a30;--borde:#c3cfd4;--ambar:#f0a81c;--verde:#0b6b36;--rojo:#a81d17;--blanco:#fff}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif;background:var(--fondo);color:var(--texto)}
+button,input,select{font:inherit}
+:focus-visible{outline:3px solid var(--ambar);outline-offset:2px}
+header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:.6rem;padding:.8rem 1.2rem;background:var(--tinta);color:#fff}
+header h1{margin:0;font-size:1.3rem}
+main{max-width:76rem;margin:0 auto;padding:1rem}
+.btn{padding:.55rem 1rem;border:2px solid var(--tinta);border-radius:.4rem;background:var(--blanco);color:var(--tinta);cursor:pointer;font-weight:700}
+.btn.pri{background:var(--ambar);border-color:var(--ambar);color:#1a1a1a}
+header .btn{background:transparent;color:#fff;border-color:#fff}
+#kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(13rem,1fr));gap:.8rem;margin-bottom:1rem}
+.kpi{background:var(--blanco);border:1px solid var(--borde);border-radius:.5rem;padding:.8rem 1rem}
+.kpi span{display:block;font-size:.95rem}
+.kpi b{font-size:2.2rem}
+.kpi.ok b{color:var(--verde)} .kpi.mal b{color:var(--rojo)}
+nav{display:flex;gap:.4rem;margin-bottom:.8rem}
+nav button{padding:.6rem 1.2rem;border:0;border-radius:.4rem .4rem 0 0;background:#cfd9dd;cursor:pointer;font-weight:700}
+nav button[aria-selected=true]{background:var(--blanco)}
+.panel{background:var(--blanco);border:1px solid var(--borde);border-radius:0 .5rem .5rem .5rem;padding:1rem}
+.filtros{display:flex;flex-wrap:wrap;gap:.6rem;align-items:end;margin-bottom:.8rem}
+.filtros label{display:grid;gap:.2rem;font-size:.9rem}
+input,select{padding:.5rem;border:1px solid #8a9aa0;border-radius:.35rem;background:#fff;color:var(--texto);min-width:0}
+.tabla{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:44rem}
+th,td{padding:.5rem .6rem;text-align:left;border-bottom:1px solid var(--borde);white-space:nowrap}
+th{background:#f1f5f6;position:sticky;top:0}
+.est{font-weight:800}
+.est.v{color:var(--verde)} .est.r{color:var(--rojo)}
+.vacio{padding:1rem;text-align:center}
+dialog{border:0;border-radius:.6rem;padding:1.2rem;width:min(30rem,94vw)}
+dialog::backdrop{background:rgba(0,0,0,.55)}
+form.grid{display:grid;gap:.7rem}
+form.grid label{display:grid;gap:.2rem}
+.fila2{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+.acciones{display:flex;justify-content:flex-end;gap:.6rem;margin-top:.4rem}
+.msg{min-height:1.4em;margin:0;color:var(--rojo);font-weight:700}
+#login{min-height:100vh;display:grid;place-items:center;padding:1rem;background:var(--tinta)}
+#login form{display:grid;gap:.8rem;width:min(24rem,100%);background:#fff;padding:1.5rem;border-radius:.6rem}
+#login h1{margin:0;font-size:1.5rem}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+
+<div id="login">
+  <form id="loginForm" autocomplete="off">
+    <h1>Panel de administración</h1>
+    <label>Usuario <input id="usuario" required></label>
+    <label>Contraseña <input id="clave" type="password" required></label>
+    <p class="msg" id="loginMsg" role="alert"></p>
+    <button class="btn pri" type="submit">Ingresar</button>
+  </form>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <h1>Jacha Inti · Administración</h1>
+    <div><span id="quien"></span> <button class="btn" id="salir">Salir</button></div>
+  </header>
+  <main>
+    <section id="kpis" aria-label="Métricas de hoy">
+      <div class="kpi"><span>Litros despachados hoy</span><b id="kLitros">–</b></div>
+      <div class="kpi ok"><span>Despachos aprobados</span><b id="kAprob">–</b></div>
+      <div class="kpi mal"><span>Despachos rechazados</span><b id="kRech">–</b></div>
+      <div class="kpi"><span>Vehículos habilitados</span><b id="kVeh">–</b><span id="kVehDet"></span></div>
+    </section>
+
+    <nav role="tablist">
+      <button role="tab" id="tabD" aria-selected="true">Despachos</button>
+      <button role="tab" id="tabV" aria-selected="false">Vehículos</button>
+    </nav>
+
+    <section class="panel" id="panelD">
+      <form class="filtros" id="filtrosD">
+        <label>Desde <input type="date" id="fDesde"></label>
+        <label>Hasta <input type="date" id="fHasta"></label>
+        <label>Placa <input id="fPlaca" placeholder="1234ABC" maxlength="10" size="9"></label>
+        <label>Surtidor <input id="fSurt" type="number" min="1" style="width:5rem"></label>
+        <label>Estado <select id="fEstado"><option value="">Todos</option><option>APROBADO</option><option>RECHAZADO</option></select></label>
+        <button class="btn pri" type="submit">Buscar</button>
+        <button class="btn" type="button" id="limpiarD">Limpiar</button>
+      </form>
+      <div class="tabla"><table>
+        <thead><tr><th>Fecha y hora</th><th>Placa</th><th>Propietario</th><th>Litros</th><th>Surtidor</th><th>Estado</th><th>Motivo</th></tr></thead>
+        <tbody id="bodyD"></tbody>
+      </table></div>
+      <p class="vacio" id="vacioD" hidden>No hay despachos con esos filtros.</p>
+    </section>
+
+    <section class="panel" id="panelV" hidden>
+      <form class="filtros" id="filtrosV">
+        <label>Buscar <input id="qV" placeholder="Placa, propietario o CI"></label>
+        <button class="btn pri" type="submit">Buscar</button>
+        <button class="btn" type="button" id="nuevoV">Nuevo vehículo</button>
+      </form>
+      <div class="tabla"><table>
+        <thead><tr><th>Placa</th><th>Propietario</th><th>CI</th><th>Combustible</th><th>Tanque (L)</th><th>Cupo diario</th><th>Disponible</th><th>Estado</th><th></th></tr></thead>
+        <tbody id="bodyV"></tbody>
+      </table></div>
+      <p class="vacio" id="vacioV" hidden>No hay vehículos que coincidan.</p>
+    </section>
+  </main>
+</div>
+
+<dialog id="dlg">
+  <form class="grid" id="formV" method="dialog">
+    <h2 id="dlgTitulo" style="margin:0">Nuevo vehículo</h2>
+    <label>Placa <input id="vPlaca" maxlength="10" placeholder="1234ABC" required></label>
+    <label>Propietario <input id="vProp" maxlength="100" required></label>
+    <div class="fila2">
+      <label>CI <input id="vCi" maxlength="20" required></label>
+      <label>Combustible <select id="vComb"><option>Gasolina Especial</option><option>Gasolina Especial (+)</option></select></label>
+    </div>
+    <div class="fila2">
+      <label>Capacidad del tanque (L) <input id="vCap" type="number" step="0.01" min="0.01" max="999.99" required></label>
+      <label>Cupo diario (L) <input id="vCupo" type="number" step="0.01" min="0" max="999.99" required></label>
+    </div>
+    <label>Estado <select id="vEstado"><option>HABILITADO</option><option>INHABILITADO</option></select></label>
+    <p class="msg" id="vMsg" role="alert"></p>
+    <div class="acciones">
+      <button class="btn" type="button" id="cancelarV">Cancelar</button>
+      <button class="btn pri" type="submit" id="guardarV">Guardar</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const $ = id => document.getElementById(id);
+let token = sessionStorage.getItem("tokenAdmin"), timer = null, vehiculos = [];
+
+async function api(url, op = {}) {
+  const cab = { ...(op.headers || {}), ...(token ? { Authorization: "Bearer " + token } : {}) };
+  let r;
+  try { r = await fetch(url, { ...op, headers: cab }); }
+  catch { throw new Error("No hay conexión con el servidor."); }
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && url !== "/login") { salir("Tu sesión expiró. Vuelve a ingresar."); }
+  if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : "Datos inválidos (" + r.status + ")");
+  return j;
+}
+
+function celda(tr, texto, clase) {
+  const td = document.createElement("td"); td.textContent = texto ?? "—";
+  if (clase) td.className = clase; tr.append(td); return td;
+}
+const num = (n, d = 2) => Number(n).toFixed(d);
+
+/* ---- Sesión ---- */
+function entrar(nombre) {
+  $("login").hidden = true; $("app").hidden = false; $("quien").textContent = nombre;
+  const hoy = new Date().toLocaleDateString("sv-SE");
+  if (!$("fDesde").value) { $("fDesde").value = hoy; $("fHasta").value = hoy; }
+  refrescar(); cargarVehiculos();
+  clearInterval(timer); timer = setInterval(refrescar, 15000);
+}
+function salir(msg) {
+  token = null; sessionStorage.removeItem("tokenAdmin"); clearInterval(timer);
+  $("app").hidden = true; $("login").hidden = false; $("loginMsg").textContent = msg || "";
+}
+$("loginForm").onsubmit = async e => {
+  e.preventDefault();
+  try {
+    const r = await api("/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: $("usuario").value.trim(), password: $("clave").value }) });
+    if (r.rol !== "ADMIN") { $("loginMsg").textContent = "Este panel es solo para administradores."; return; }
+    token = r.token; sessionStorage.setItem("tokenAdmin", token); $("clave").value = ""; entrar(r.nombre);
+  } catch (err) { $("loginMsg").textContent = err.message; }
+};
+$("salir").onclick = () => salir();
+
+/* ---- KPIs y despachos (se actualizan cada 15 s) ---- */
+async function refrescar() {
+  try {
+    const s = await api("/admin/stats");
+    $("kLitros").textContent = num(s.litros_hoy) + " L";
+    $("kAprob").textContent = s.despachos_aprobados_hoy;
+    $("kRech").textContent = s.despachos_rechazados_hoy;
+    $("kVeh").textContent = s.vehiculos_habilitados + " / " + s.vehiculos_total;
+    $("kVehDet").textContent = s.vehiculos_cupo_agotado + " con cupo agotado";
+    await cargarDespachos();
+  } catch (e) { /* un fallo de red puntual no debe borrar la pantalla */ }
+}
+
+async function cargarDespachos() {
+  const p = new URLSearchParams();
+  [["desde", "fDesde"], ["hasta", "fHasta"], ["placa", "fPlaca"], ["surtidor_id", "fSurt"], ["estado", "fEstado"]]
+    .forEach(([k, id]) => { if ($(id).value.trim()) p.set(k, $(id).value.trim()); });
+  const filas = await api("/admin/despachos?" + p);
+  $("bodyD").replaceChildren(...filas.map(f => {
+    const tr = document.createElement("tr");
+    celda(tr, new Date(f.fecha_hora).toLocaleString("es-BO"));
+    celda(tr, f.placa); celda(tr, f.propietario); celda(tr, num(f.litros)); celda(tr, f.surtidor_id);
+    celda(tr, f.estado === "APROBADO" ? "✔ APROBADO" : "✖ RECHAZADO", "est " + (f.estado === "APROBADO" ? "v" : "r"));
+    celda(tr, f.motivo); return tr;
+  }));
+  $("vacioD").hidden = filas.length > 0;
+}
+$("filtrosD").onsubmit = e => { e.preventDefault(); cargarDespachos().catch(() => {}); };
+$("limpiarD").onclick = () => { $("filtrosD").reset(); cargarDespachos().catch(() => {}); };
+
+/* ---- Vehículos ---- */
+async function cargarVehiculos() {
+  try {
+    vehiculos = await api("/admin/vehiculos?q=" + encodeURIComponent($("qV").value.trim()));
+    $("bodyV").replaceChildren(...vehiculos.map(v => {
+      const tr = document.createElement("tr");
+      celda(tr, v.placa); celda(tr, v.propietario); celda(tr, v.ci_propietario); celda(tr, v.tipo_combustible);
+      celda(tr, num(v.capacidad_tanque_litros)); celda(tr, num(v.cupo_diario_litros)); celda(tr, num(v.cupo_disponible_litros));
+      celda(tr, v.estado === "HABILITADO" ? "✔ HABILITADO" : v.estado === "CUPO_AGOTADO" ? "● CUPO AGOTADO" : "✖ INHABILITADO",
+            "est " + (v.estado === "INHABILITADO" ? "r" : v.estado === "HABILITADO" ? "v" : ""));
+      const td = document.createElement("td"), b = document.createElement("button");
+      b.className = "btn"; b.textContent = "Editar"; b.onclick = () => abrirModal(v); td.append(b); tr.append(td);
+      return tr;
+    }));
+    $("vacioV").hidden = vehiculos.length > 0;
+  } catch (e) { $("vacioV").hidden = false; $("vacioV").textContent = e.message; }
+}
+$("filtrosV").onsubmit = e => { e.preventDefault(); cargarVehiculos(); };
+
+function abrirModal(v) {
+  $("formV").reset(); $("vMsg").textContent = "";
+  $("dlgTitulo").textContent = v ? "Editar vehículo " + v.placa : "Nuevo vehículo";
+  $("vPlaca").readOnly = !!v;
+  if (v) {
+    $("vPlaca").value = v.placa; $("vProp").value = v.propietario; $("vCi").value = v.ci_propietario;
+    $("vComb").value = v.tipo_combustible; $("vCap").value = v.capacidad_tanque_litros;
+    $("vCupo").value = v.cupo_diario_litros;
+    $("vEstado").value = v.estado === "INHABILITADO" ? "INHABILITADO" : "HABILITADO";
+  }
+  $("dlg").showModal(); (v ? $("vProp") : $("vPlaca")).focus();
+}
+$("nuevoV").onclick = () => abrirModal(null);
+$("cancelarV").onclick = () => $("dlg").close();
+
+$("formV").onsubmit = async e => {
+  e.preventDefault();
+  $("guardarV").disabled = true; $("vMsg").textContent = "";
+  try {
+    const r = await api("/admin/vehiculos", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        placa: $("vPlaca").value, propietario: $("vProp").value.trim(), ci_propietario: $("vCi").value.trim(),
+        tipo_combustible: $("vComb").value, capacidad_tanque_litros: parseFloat($("vCap").value),
+        cupo_diario_litros: parseFloat($("vCupo").value), estado: $("vEstado").value }) });
+    $("dlg").close(); await cargarVehiculos(); refrescar();
+  } catch (err) { $("vMsg").textContent = err.message; }
+  finally { $("guardarV").disabled = false; }
+};
+
+/* ---- Pestañas ---- */
+function pestaña(v) {
+  $("panelD").hidden = v; $("panelV").hidden = !v;
+  $("tabD").setAttribute("aria-selected", !v); $("tabV").setAttribute("aria-selected", v);
+}
+$("tabD").onclick = () => pestaña(false);
+$("tabV").onclick = () => pestaña(true);
+
+/* ---- Inicio: si ya hay token, valida que siga vigente ---- */
+if (token) {
+  api("/admin/stats").then(() => entrar("Administrador")).catch(() => salir());
+}
+</script>
+</body>
+</html>

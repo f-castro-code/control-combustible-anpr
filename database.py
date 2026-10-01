@@ -352,12 +352,15 @@ def guardar_vehiculo(d: dict) -> tuple[bool, dict]:
     sql = ("INSERT INTO vehiculos (placa, propietario, ci_propietario, tipo_combustible, "
            "capacidad_tanque_litros, cupo_diario_litros, cupo_disponible_litros, estado) "
            "VALUES (%(placa)s, %(propietario)s, %(ci_propietario)s, %(tipo_combustible)s, "
-           "%(capacidad_tanque_litros)s, %(cupo_diario_litros)s, %(cupo_diario_litros)s, %(estado)s) AS nuevo "
-           "ON DUPLICATE KEY UPDATE propietario = nuevo.propietario, ci_propietario = nuevo.ci_propietario, "
-           "tipo_combustible = nuevo.tipo_combustible, capacidad_tanque_litros = nuevo.capacidad_tanque_litros, "
-           "cupo_diario_litros = nuevo.cupo_diario_litros, "
-           "cupo_disponible_litros = LEAST(vehiculos.cupo_disponible_litros, nuevo.cupo_diario_litros), "
-           "estado = nuevo.estado")
+           "%(capacidad_tanque_litros)s, %(cupo_diario_litros)s, %(cupo_diario_litros)s, %(estado)s) "
+           "ON DUPLICATE KEY UPDATE "
+           "propietario = VALUES(propietario), "
+           "ci_propietario = VALUES(ci_propietario), "
+           "tipo_combustible = VALUES(tipo_combustible), "
+           "capacidad_tanque_litros = VALUES(capacidad_tanque_litros), "
+           "cupo_diario_litros = VALUES(cupo_diario_litros), "
+           "cupo_disponible_litros = LEAST(vehiculos.cupo_disponible_litros, VALUES(cupo_diario_litros)), "
+           "estado = VALUES(estado)")
 
     with get_connection() as conn:
         cur = conn.cursor(dictionary=True)
@@ -370,8 +373,6 @@ def guardar_vehiculo(d: dict) -> tuple[bool, dict]:
             return creado, fila
         finally:
             cur.close()
-
-
 # ---------------------------------------------------------------------
 # Prueba rápida:  python database.py
 # ---------------------------------------------------------------------

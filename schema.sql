@@ -213,13 +213,45 @@ VALUES
 ('3456JKL', 'Rosa Quispe',   '5432109', 'Gasolina Especial',     35.00, 30.00, 30.00, 'INHABILITADO')
 ON DUPLICATE KEY UPDATE propietario = VALUES(propietario);
 
--- ---------------------------------------------------------------------
--- 8. PRUEBAS RÁPIDAS (descomentar para probar)
--- ---------------------------------------------------------------------
--- CALL sp_validar_y_despachar('1234ABC', 20, 1, @ok, @motivo, @resto);  -- APROBADO
--- SELECT @ok, @motivo, @resto;
--- CALL sp_validar_y_despachar('9012GHI', 10, 1, @ok, @motivo, @resto);  -- RECHAZADO (cupo agotado)
--- SELECT @ok, @motivo, @resto;
--- CALL sp_validar_y_despachar('0000XXX', 10, 1, @ok, @motivo, @resto);  -- RECHAZADO (no registrada)
--- SELECT @ok, @motivo, @resto;
--- SELECT * FROM despachos;
+-- =====================================================================
+-- USUARIOS Y ROLES - Estación de Servicio Jacha Inti S.R.L.
+-- Importar DESPUÉS de schema.sql:  mysql -u root -p < schema_usuarios.sql
+-- Las contraseñas se guardan con hash PBKDF2 (nunca en texto plano).
+-- =====================================================================
+USE estacion_jacha_inti;
+
+CREATE TABLE IF NOT EXISTS usuarios (
+    id             INT          NOT NULL AUTO_INCREMENT,
+    nombre         VARCHAR(100) NOT NULL,
+    username       VARCHAR(50)  NOT NULL,
+    password_hash  VARCHAR(255) NOT NULL,
+    rol            ENUM('ADMIN', 'PLAYERO') NOT NULL,
+    activo         BOOLEAN      NOT NULL DEFAULT TRUE,
+    fecha_creacion DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ultimo_acceso  DATETIME     NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_username (username)
+) ENGINE=InnoDB;
+
+-- Usuarios de PRUEBA (cambiar las claves antes de usar en producción):
+--   admin     / Admin#2026     (rol ADMIN)
+--   playero1  / Playero#2026   (rol PLAYERO)
+INSERT INTO usuarios (nombre, username, password_hash, rol) VALUES
+('Administrador Jacha Inti', 'admin',    'pbkdf2_sha256$600000$e85ff024487a6a064a1c655dff42875c$c82e3a6c252b313a26c48d7c2c00371f70af8475229289f52e07cf099d6bc996', 'ADMIN'),
+('Operador de Pista 1',      'playero1', 'pbkdf2_sha256$600000$181bd78ab4e83d3cba9d1a603bc139cc$ec12980053a1a694da23e9ae0dd656a9bf095b2a1cd62d91c96dd833f4d5a13a',  'PLAYERO')
+ON DUPLICATE KEY UPDATE nombre = VALUES(nombre);
+
+
+INSERT INTO vehiculos 
+    (placa, propietario, ci_propietario, tipo_combustible, capacidad_tanque_litros, cupo_diario_litros, cupo_disponible_litros, estado)
+VALUES 
+    ('1205ZKP', 'Juan Carlos Mamani', '6842105-LP', 'Gasolina Especial', 50.00, 35.00, 35.00, 'HABILITADO'),
+    ('1820FCC', 'María Rene Quispe', '7935142-LP', 'Gasolina Especial (+)', 60.00, 40.00, 40.00, 'HABILITADO'),
+    ('2361TFH', 'Alejandro Flores Condori', '8421630-LP', 'Gasolina Especial', 45.00, 30.00, 30.00, 'HABILITADO'),
+    ('2363KKI', 'Laura Elena Choque', '9105423-LP', 'Gasolina Especial', 55.00, 35.00, 35.00, 'HABILITADO'),
+    ('2534RIS', 'Carlos Daniel Mendoza', '6147852-LP', 'Gasolina Especial (+)', 70.00, 50.00, 50.00, 'HABILITADO'),
+    ('3070MXS', 'Ana Paola Vargas', '7302914-LP', 'Gasolina Especial', 40.00, 25.00, 25.00, 'HABILITADO'),
+    ('4240GEH', 'Luis Fernando Apaza', '8520361-LP', 'Gasolina Especial', 50.00, 35.00, 35.00, 'HABILITADO'),
+    ('5172LDK', 'Patricia Belen Copa', '9431075-LP', 'Gasolina Especial (+)', 65.00, 45.00, 45.00, 'HABILITADO'),
+    ('5191PDD', 'Jorge Antonio Ticona', '6714920-LP', 'Gasolina Especial', 42.00, 30.00, 30.00, 'HABILITADO'),
+    ('5318GZK', 'Sonia Maribel Callisaya', '7895123-LP', 'Gasolina Especial', 52.00, 35.00, 35.00, 'HABILITADO');
